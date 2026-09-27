@@ -303,4 +303,4 @@ Upcoming:
 
 ## License
 
-Personal project — no license yet.
+Personal project — no license yet
