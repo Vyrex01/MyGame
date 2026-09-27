@@ -18,11 +18,12 @@ Player moves with **WASD** and aims with the **mouse**.
 4. File-by-File Breakdown
 5. How to Run
 6. Controls
-7. Git & GitHub Setup
-8. Common Errors & Fixes
-9. AI Collaboration Rules
-10. Roadmap
-11. Changelog
+7. Gameplay Loop
+8. Git & GitHub Setup
+9. Common Errors & Fixes
+10. AI Collaboration Rules
+11. Roadmap
+12. Changelog
 
 ---
 
@@ -34,7 +35,10 @@ This is a **2D top-down game** built from scratch with LÖVE2D.
 - Movement: **WASD** (arrow keys also work)
 - Aiming: **mouse position** — the barrel always faces the cursor
 - Shooting: **hold left mouse button** (auto-fire with cooldown)
+- Enemies: **red circles** spawn from screen edges and chase the player
+- Killing enemies with bullets awards **+100 score**
 - Diagonal movement is normalized so it isn't faster than straight
+- Spawn rate ramps up over time (difficulty scaling)
 
 Code is heavily commented so multiple AI assistants (and the human)
 can work on it without confusion.
@@ -54,9 +58,10 @@ can work on it without confusion.
 
     ~/Downloads/mygame/
     ├── conf.lua      # Window + engine configuration
-    ├── main.lua      # Entry point — game loop, HUD, input, bullet manager
+    ├── main.lua      # Entry point — game loop, HUD, input, spawns, collisions
     ├── player.lua    # Player entity (WASD, mouse aim, shoot cooldown)
     ├── bullet.lua    # Bullet entity (position, velocity, lifetime)
+    ├── enemy.lua     # Enemy entity (chase AI, killable)
     └── README.md     # This file
 
 ---
@@ -104,20 +109,36 @@ Key concepts:
 - Lifetime: bullet.dead = true after ~2.5 seconds
 - Dead bullets are removed from main.lua's bullets table
 
+### enemy.lua
+
+Simple chase-AI enemy.
+
+- Enemy.new(x, y) — constructor
+- Enemy:update(dt, px, py) — moves toward player (px, py)
+- Enemy:takeDamage(dmg) — reduces health, sets dead = true at 0
+- Enemy:draw() — red circle with white eyes
+
+Key concepts:
+
+- Vector normalization: prevents speed changes at different distances
+- Random speed (90-170 px/s) so enemies don't move in lockstep
+- 1 HP: one bullet kill
+
 ### main.lua
 
 LÖVE2D calls these automatically:
 
-- love.load() — one-time setup (background color, player spawn, bullets table)
-- love.update(dt) — per-frame logic (player update, bullets update, hold-to-fire)
-- love.draw() — per-frame rendering (bullets, player, HUD text)
+- love.load() — one-time setup (background, player spawn, empty tables, random seed)
+- love.update(dt) — per-frame logic (player, spawning, bullets, enemies, collisions)
+- love.draw() — per-frame rendering (bullets, enemies, player, HUD)
 - love.keypressed(key) — ESC quits, F11 toggles fullscreen
 
-HUD displays:
+Handles:
 
-- Controls hint line
-- FPS + live bullet count
-- Player angle + X/Y position (debug)
+- Spawn timer + difficulty ramp (spawnInterval decreases)
+- Bullet-vs-enemy circle collision
+- Score tracking
+- HUD: FPS, score, enemy count, bullet count, next spawn time
 
 ---
 
@@ -146,7 +167,19 @@ A 1600x900 window opens.
 
 ---
 
-## 7. Git & GitHub Setup
+## 7. Gameplay Loop
+
+1. Player spawns at screen center (800, 450)
+2. Enemies spawn from random screen edges every ~1.8s
+3. Enemies walk straight toward the player at random speeds (90-170 px/s)
+4. Player holds left-click to fire bullets toward the cursor
+5. Bullet hits enemy → enemy dies → +100 score
+6. Spawn interval shrinks by 0.02s per spawn (floor 0.5s)
+7. Score increases indefinitely (no win/lose yet)
+
+---
+
+## 8. Git & GitHub Setup
 
 Repo: https://github.com/Vyrex01/MyGame
 
@@ -168,9 +201,15 @@ Use a Personal Access Token (classic) with repo scope.
 - Use as PASSWORD when Git prompts
 - Username = GitHub username (Vyrex01), NOT email, NOT Google
 
-### Push
+### Standard Workflow (avoid push rejections)
 
-    git push -u origin main
+    git add .
+    git commit -m "short description"
+    git pull origin main --no-rebase
+    git push
+
+The pull-before-push pattern prevents "Updates were rejected"
+errors when the remote has new commits.
 
 ### Remember credentials
 
@@ -178,7 +217,7 @@ Use a Personal Access Token (classic) with repo scope.
 
 ---
 
-## 8. Common Errors & Fixes
+## 9. Common Errors & Fixes
 
 | Error                                 | Fix                                        |
 |---------------------------------------|--------------------------------------------|
@@ -186,13 +225,13 @@ Use a Personal Access Token (classic) with repo scope.
 | remote origin already exists          | Skip git remote add, or use set-url        |
 | Invalid username or token             | Username = Vyrex01, not email              |
 | Password authentication not supported | Use the token, not account password        |
-| Updates were rejected                 | git pull origin main --rebase, then push   |
+| Updates were rejected                 | git pull origin main --no-rebase, then push|
 | src refspec main does not match any   | git branch -M main, then push              |
 | Logged in via Google                  | Irrelevant for git — use username + token  |
 
 ---
 
-## 9. AI Collaboration Rules
+## 10. AI Collaboration Rules
 
 ### File format
 
@@ -228,6 +267,7 @@ Never "just replace lines X-Y". Always the full file.
 
     git add .
     git commit -m "short description"
+    git pull origin main --no-rebase
     git push
 
 5. AI also updates README.md — roadmap, changelog, file list
@@ -242,12 +282,12 @@ Never "just replace lines X-Y". Always the full file.
 Start a new chat with:
 
     "My project is at https://github.com/Vyrex01/MyGame.
-     Current files: [paste main.lua, player.lua, bullet.lua, conf.lua].
+     Current files: [paste main.lua, player.lua, bullet.lua, enemy.lua, conf.lua].
      Please help with XXX."
 
 ---
 
-## 10. Roadmap
+## 11. Roadmap
 
 Done:
 
@@ -261,21 +301,28 @@ Done:
 - [x] GitHub repo + first push
 - [x] Shooting with left-click (bullet entity, cooldown, hold-to-fire)
 - [x] Player clamped to screen bounds
+- [x] Enemies with simple chase AI (chase, spawn, kill, score)
+- [x] Collision: bullet-vs-enemy (circle-circle)
 
 Upcoming:
 
-- [ ] Enemies with simple chase AI           <-- NEXT
-- [ ] Collision (circle-circle, then bump.lua)
+- [ ] Collision + health (player takes damage)   <-- NEXT
 - [ ] Camera / world scrolling
 - [ ] Sprites instead of circles
 - [ ] Game states (menu, playing, paused, game-over)
 - [ ] Sound effects
-- [ ] Score / health system
 - [ ] Levels / wave spawning
 
 ---
 
-## 11. Changelog
+## 12. Changelog
+
+### v0.4 — Enemies
+
+- Added enemy.lua (chase AI, takeDamage, dead flag)
+- main.lua: enemies table, spawnEnemy() on edges, difficulty ramp
+- main.lua: bullet-vs-enemy circle collision, +100 score per kill
+- main.lua: HUD shows score, enemy count, next spawn timer
 
 ### v0.3 — Shooting
 
@@ -303,4 +350,4 @@ Upcoming:
 
 ## License
 
-Personal project — no license yet
+Personal project — no license yet.
