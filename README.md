@@ -37,8 +37,11 @@ This is a **2D top-down game** built from scratch with LÖVE2D.
 - Shooting: **hold left mouse button** (auto-fire with cooldown)
 - Enemies: **red circles** spawn from screen edges and chase the player
 - Killing enemies with bullets awards **+100 score**
-- Diagonal movement is normalized so it isn't faster than straight
+- Player has **100 HP**, loses 20 HP per enemy contact, 1s invulnerability after each hit
+- Health bar turns green → yellow → red as HP drops
+- **Game Over** overlay when HP reaches 0, press **R** to restart
 - Spawn rate ramps up over time (difficulty scaling)
+- Diagonal movement is normalized so it isn't faster than straight
 
 Code is heavily commented so multiple AI assistants (and the human)
 can work on it without confusion.
@@ -59,9 +62,9 @@ can work on it without confusion.
     ~/Downloads/mygame/
     ├── conf.lua      # Window + engine configuration
     ├── main.lua      # Entry point — game loop, HUD, input, spawns, collisions
-    ├── player.lua    # Player entity (WASD, mouse aim, shoot cooldown)
+    ├── player.lua    # Player entity (WASD, mouse aim, shoot cooldown, health)
     ├── bullet.lua    # Bullet entity (position, velocity, lifetime)
-    ├── enemy.lua     # Enemy entity (chase AI, killable)
+    ├── enemy.lua     # Enemy entity (chase AI, contact damage)
     └── README.md     # This file
 
 ---
@@ -83,10 +86,13 @@ Runs BEFORE main.lua. Sets:
 Metatable-based OOP.
 
 - Player.new(x, y) — constructor
-- Player:update(dt) — aim at mouse, WASD movement, cooldown tick, clamp to screen
-- Player:canShoot() — returns true if cooldown has elapsed
-- Player:resetCooldown() — restarts cooldown after firing
-- Player:draw() — green circle + white rectangular barrel (rotated via translate + rotate)
+- Player:update(dt) — aim at mouse, WASD movement, cooldown + invuln tick, clamp to screen
+- Player:canShoot() — returns true if cooldown elapsed and alive
+- Player:resetCooldown() — restarts shoot cooldown
+- Player:takeDamage(amount) — applies damage only if not invulnerable; returns true if it landed
+- Player:isAlive() — returns not dead
+- Player:draw() — green circle + white barrel; flickers while invuln
+- Player:drawHealthBar(x, y, w, h) — HUD helper, color-coded fill
 
 Key concepts:
 
@@ -94,6 +100,8 @@ Key concepts:
 - Normalization: prevents diagonal being 1.41x faster
 - math.atan2(dy, dx): converts vector to angle
 - love.graphics.push()/pop(): isolated transform stack for rotated drawing
+- Invulnerability frames: prevents damage every frame while touching an enemy
+- Flicker: skip drawing every other 0.1s while invuln > 0
 
 ### bullet.lua
 
@@ -111,7 +119,7 @@ Key concepts:
 
 ### enemy.lua
 
-Simple chase-AI enemy.
+Simple chase-AI enemy with contact damage.
 
 - Enemy.new(x, y) — constructor
 - Enemy:update(dt, px, py) — moves toward player (px, py)
@@ -123,22 +131,24 @@ Key concepts:
 - Vector normalization: prevents speed changes at different distances
 - Random speed (90-170 px/s) so enemies don't move in lockstep
 - 1 HP: one bullet kill
+- damage = 20: how much HP the player loses on contact
 
 ### main.lua
 
 LÖVE2D calls these automatically:
 
 - love.load() — one-time setup (background, player spawn, empty tables, random seed)
-- love.update(dt) — per-frame logic (player, spawning, bullets, enemies, collisions)
-- love.draw() — per-frame rendering (bullets, enemies, player, HUD)
-- love.keypressed(key) — ESC quits, F11 toggles fullscreen
+- love.update(dt) — per-frame logic (player, spawning, bullets, enemies, collisions, shooting)
+- love.draw() — per-frame rendering (bullets, enemies, player, HUD, Game Over overlay)
+- love.keypressed(key) — ESC quits, F11 toggles fullscreen, R restarts when dead
 
 Handles:
 
-- Spawn timer + difficulty ramp (spawnInterval decreases)
-- Bullet-vs-enemy circle collision
-- Score tracking
-- HUD: FPS, score, enemy count, bullet count, next spawn time
+- Spawn timer + difficulty ramp (spawnInterval decreases 0.02s per spawn, floor 0.5s)
+- Bullet-vs-enemy circle collision (+100 score per kill)
+- Enemy-vs-player circle collision (20 damage + 40px knockback to enemy)
+- Game Over state when player dies
+- HUD: FPS, score, enemy count, bullet count, health bar
 
 ---
 
@@ -163,19 +173,22 @@ A 1600x900 window opens.
 | Mouse move      | Aim gun           |
 | Hold Left Click | Shoot (auto-fire) |
 | F11             | Toggle fullscreen |
+| R               | Restart (when dead) |
 | ESC             | Quit              |
 
 ---
 
 ## 7. Gameplay Loop
 
-1. Player spawns at screen center (800, 450)
+1. Player spawns at screen center (800, 450) with 100 HP
 2. Enemies spawn from random screen edges every ~1.8s
 3. Enemies walk straight toward the player at random speeds (90-170 px/s)
 4. Player holds left-click to fire bullets toward the cursor
 5. Bullet hits enemy → enemy dies → +100 score
-6. Spawn interval shrinks by 0.02s per spawn (floor 0.5s)
-7. Score increases indefinitely (no win/lose yet)
+6. Enemy touches player → player loses 20 HP, 1s invulnerability + flicker, enemy knocked back 40px
+7. Health bar turns yellow at 50%, red at 25%
+8. Spawn interval shrinks by 0.02s per spawn (floor 0.5s)
+9. At 0 HP: Game Over overlay; press R to restart
 
 ---
 
@@ -201,7 +214,7 @@ Use a Personal Access Token (classic) with repo scope.
 - Use as PASSWORD when Git prompts
 - Username = GitHub username (Vyrex01), NOT email, NOT Google
 
-### Standard Workflow (avoid push rejections)
+### Standard Workflow (avoids push rejections)
 
     git add .
     git commit -m "short description"
@@ -228,6 +241,7 @@ errors when the remote has new commits.
 | Updates were rejected                 | git pull origin main --no-rebase, then push|
 | src refspec main does not match any   | git branch -M main, then push              |
 | Logged in via Google                  | Irrelevant for git — use username + token  |
+| Lua syntax error on two assigns       | One statement per line (use ; or newline)  |
 
 ---
 
@@ -303,19 +317,30 @@ Done:
 - [x] Player clamped to screen bounds
 - [x] Enemies with simple chase AI (chase, spawn, kill, score)
 - [x] Collision: bullet-vs-enemy (circle-circle)
+- [x] Collision + health (100 HP, 20 dmg, i-frames, health bar, game over)
 
 Upcoming:
 
-- [ ] Collision + health (player takes damage)   <-- NEXT
-- [ ] Camera / world scrolling
+- [ ] Camera / world scrolling                <-- NEXT
 - [ ] Sprites instead of circles
 - [ ] Game states (menu, playing, paused, game-over)
 - [ ] Sound effects
+- [ ] Score display improvements
 - [ ] Levels / wave spawning
 
 ---
 
 ## 12. Changelog
+
+### v0.5 — Health & Damage
+
+- player.lua: added health, maxHealth, invuln, invulnDuration, dead
+- player.lua: takeDamage() with i-frames, isAlive(), drawHealthBar()
+- player.lua: flicker draw while invulnerable
+- enemy.lua: added damage = 20 field (contact damage)
+- main.lua: enemy-vs-player circle collision with knockback
+- main.lua: Game Over overlay, R to restart
+- main.lua: HUD shows health bar
 
 ### v0.4 — Enemies
 
