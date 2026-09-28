@@ -1,3 +1,5 @@
+![MyGame cover](cover.jpg)
+
 # MyGame — LÖVE2D Top-Down Shooter
 
 A 2D top-down game built with **LÖVE2D** and **Lua** on Linux Mint.
@@ -19,11 +21,12 @@ Player moves with **WASD** and aims with the **mouse**.
 5. How to Run
 6. Controls
 7. Gameplay Loop
-8. Git & GitHub Setup
-9. Common Errors & Fixes
-10. AI Collaboration Rules
-11. Roadmap
-12. Changelog
+8. Game States
+9. Git & GitHub Setup
+10. Common Errors & Fixes
+11. AI Collaboration Rules
+12. Roadmap
+13. Changelog
 
 ---
 
@@ -35,11 +38,13 @@ This is a **2D top-down game** built from scratch with LÖVE2D.
 - Movement: **WASD** (arrow keys also work)
 - Aiming: **mouse position** — the barrel always faces the cursor
 - Shooting: **hold left mouse button** (auto-fire with cooldown)
-- Enemies: **red circles** spawn from screen edges and chase the player
+- Enemies: **red circles** spawn from world edges and chase the player
 - Killing enemies with bullets awards **+100 score**
 - Player has **100 HP**, loses 20 HP per enemy contact, 1s invulnerability after each hit
 - Health bar turns green → yellow → red as HP drops
-- **Game Over** overlay when HP reaches 0, press **R** to restart
+- World is **3000x2000** with a visible grid; the 1600x900 window is a viewport
+- **Camera follows the player** with smooth lerp, clamped to world edges
+- **Game state machine**: Menu → Playing → Paused → Game Over
 - Spawn rate ramps up over time (difficulty scaling)
 - Diagonal movement is normalized so it isn't faster than straight
 
@@ -60,11 +65,14 @@ can work on it without confusion.
 ## 3. Project Structure
 
     ~/Downloads/mygame/
+    ├── cover.jpg     # Title / cover image (this README)
     ├── conf.lua      # Window + engine configuration
-    ├── main.lua      # Entry point — game loop, HUD, input, spawns, collisions
+    ├── main.lua      # Entry point — game loop, state routing, HUD
     ├── player.lua    # Player entity (WASD, mouse aim, shoot cooldown, health)
     ├── bullet.lua    # Bullet entity (position, velocity, lifetime)
     ├── enemy.lua     # Enemy entity (chase AI, contact damage)
+    ├── camera.lua    # Follow camera for the 3000x2000 world
+    ├── state.lua     # Game state machine (menu / playing / paused / gameover)
     └── README.md     # This file
 
 ---
@@ -85,8 +93,8 @@ Runs BEFORE main.lua. Sets:
 
 Metatable-based OOP.
 
-- Player.new(x, y) — constructor
-- Player:update(dt) — aim at mouse, WASD movement, cooldown + invuln tick, clamp to screen
+- Player.new(x, y) — constructor (defaults to world center 1500, 1000)
+- Player:update(dt, worldMouseX, worldMouseY, worldW, worldH) — aim at world mouse, WASD movement, cooldown + invuln tick, clamp to world
 - Player:canShoot() — returns true if cooldown elapsed and alive
 - Player:resetCooldown() — restarts shoot cooldown
 - Player:takeDamage(amount) — applies damage only if not invulnerable; returns true if it landed
@@ -102,6 +110,7 @@ Key concepts:
 - love.graphics.push()/pop(): isolated transform stack for rotated drawing
 - Invulnerability frames: prevents damage every frame while touching an enemy
 - Flicker: skip drawing every other 0.1s while invuln > 0
+- Aim uses WORLD mouse coordinates (screen mouse + camera offset)
 
 ### bullet.lua
 
@@ -122,7 +131,7 @@ Key concepts:
 Simple chase-AI enemy with contact damage.
 
 - Enemy.new(x, y) — constructor
-- Enemy:update(dt, px, py) — moves toward player (px, py)
+- Enemy:update(dt, px, py) — moves toward player (px, py) in world space
 - Enemy:takeDamage(dmg) — reduces health, sets dead = true at 0
 - Enemy:draw() — red circle with white eyes
 
@@ -133,22 +142,60 @@ Key concepts:
 - 1 HP: one bullet kill
 - damage = 20: how much HP the player loses on contact
 
+### camera.lua
+
+Follow camera with smoothing and world clamping.
+
+- Camera.new(worldW, worldH, screenW, screenH) — constructor
+- Camera:update(dt, targetX, targetY) — lerps toward target-centered position, clamped to world
+- Camera:apply() — push + translate for world drawing
+- Camera:reset() — pop back to screen space
+- Camera:screenToWorld(sx, sy) — convert mouse screen coords to world coords
+- Camera:worldToScreen(wx, wy) — inverse
+
+Key concepts:
+
+- Lerp: pos += (desired - pos) * smooth * dt → smooth follow
+- Clamping: camera never shows outside the world bounds
+- Transform stack: push/pop so HUD stays in screen space
+- Screen→World: add camera offset so mouse aim works correctly
+
+### state.lua
+
+Finite state machine.
+
+- State.current — string: "menu" / "playing" / "paused" / "gameover"
+- State.set(name) — switch state
+- State.is(name) — check current state
+
+Key concepts:
+
+- Update/draw/input routed by current state
+- Only "playing" updates gameplay; others freeze
+- Menu → Playing → (Paused ↔ Playing) → Game Over → Menu
+- Prevents input leaking (clicks in menu don't shoot)
+
 ### main.lua
 
 LÖVE2D calls these automatically:
 
-- love.load() — one-time setup (background, player spawn, empty tables, random seed)
-- love.update(dt) — per-frame logic (player, spawning, bullets, enemies, collisions, shooting)
-- love.draw() — per-frame rendering (bullets, enemies, player, HUD, Game Over overlay)
-- love.keypressed(key) — ESC quits, F11 toggles fullscreen, R restarts when dead
+- love.load() — world size, background, start new game, set state to "menu"
+- love.update(dt) — returns early unless playing; converts mouse to world coords; updates player/camera/spawns/collisions/shooting
+- love.draw() — routes to drawMenu / drawPlaying / drawPaused / drawGameOver
+- love.keypressed(key) — global (ESC, F11) + per-state keys
+- love.mousepressed(x, y, button) — blocks clicks outside "playing"
 
 Handles:
 
+- WORLD_W = 3000, WORLD_H = 2000, SCREEN_W = 1600, SCREEN_H = 900
+- startNewGame() resets player, camera, bullets, enemies, score, spawn timer
+- Camera target = player, follows with lerp
+- Screen→World conversion for the mouse before aiming
 - Spawn timer + difficulty ramp (spawnInterval decreases 0.02s per spawn, floor 0.5s)
 - Bullet-vs-enemy circle collision (+100 score per kill)
 - Enemy-vs-player circle collision (20 damage + 40px knockback to enemy)
-- Game Over state when player dies
-- HUD: FPS, score, enemy count, bullet count, health bar
+- State change to "gameover" when player dies
+- HUD: FPS, score, enemy count, camera position, health bar
 
 ---
 
@@ -157,42 +204,67 @@ Handles:
     cd ~/Downloads/mygame
     love .
 
-A 1600x900 window opens.
+A 1600x900 window opens showing the main menu.
 
 ---
 
 ## 6. Controls
 
-| Key             | Action            |
-|-----------------|-------------------|
-| W               | Move up           |
-| A               | Move left         |
-| S               | Move down         |
-| D               | Move right        |
-| Arrow keys      | Also move (bonus) |
-| Mouse move      | Aim gun           |
-| Hold Left Click | Shoot (auto-fire) |
-| F11             | Toggle fullscreen |
-| R               | Restart (when dead) |
-| ESC             | Quit              |
+| Key             | Action                |
+|-----------------|-----------------------|
+| W / A / S / D   | Move                  |
+| Arrow keys      | Also move (bonus)     |
+| Mouse move      | Aim gun               |
+| Hold Left Click | Shoot (auto-fire)     |
+| ENTER           | Start game (from menu)|
+| P               | Pause / Resume        |
+| M               | Return to menu        |
+| R               | Restart (from gameover)|
+| F11             | Toggle fullscreen     |
+| ESC             | Quit                  |
 
 ---
 
 ## 7. Gameplay Loop
 
-1. Player spawns at screen center (800, 450) with 100 HP
-2. Enemies spawn from random screen edges every ~1.8s
-3. Enemies walk straight toward the player at random speeds (90-170 px/s)
-4. Player holds left-click to fire bullets toward the cursor
-5. Bullet hits enemy → enemy dies → +100 score
-6. Enemy touches player → player loses 20 HP, 1s invulnerability + flicker, enemy knocked back 40px
-7. Health bar turns yellow at 50%, red at 25%
-8. Spawn interval shrinks by 0.02s per spawn (floor 0.5s)
-9. At 0 HP: Game Over overlay; press R to restart
+1. Title screen appears with "MYGAME — Press ENTER to Start"
+2. Press ENTER → player spawns at world center (1500, 1000) with 100 HP
+3. Camera follows player smoothly (lerp factor 5.0)
+4. Enemies spawn from world edges every ~1.8s
+5. Enemies walk toward the player at random speeds (90-170 px/s)
+6. Player holds left-click to fire bullets toward the cursor (aim uses world coords)
+7. Bullet hits enemy → enemy dies → +100 score
+8. Enemy touches player → player loses 20 HP, 1s invulnerability + flicker, enemy knocked back 40px
+9. Health bar turns yellow at 50%, red at 25%
+10. Spawn interval shrinks by 0.02s per spawn (floor 0.5s)
+11. Press P to pause anytime
+12. At 0 HP → Game Over; press R to restart, or M for menu
 
 ---
 
-## 8. Git & GitHub Setup
+## 8. Game States
+
+    menu      Title screen, press ENTER to start
+              ↓
+    playing   Active gameplay
+              ↕ (press P)
+    paused    Frozen world + dark overlay
+              ↓ (die)
+    gameover  Final score, R restart / M menu
+
+Transitions:
+
+- Menu → Playing: press **ENTER**
+- Playing → Paused: press **P**
+- Paused → Playing: press **P**
+- Paused → Menu: press **M**
+- Playing → Game Over: HP reaches 0
+- Game Over → Playing: press **R**
+- Game Over → Menu: press **M**
+
+---
+
+## 9. Git & GitHub Setup
 
 Repo: https://github.com/Vyrex01/MyGame
 
@@ -230,7 +302,7 @@ errors when the remote has new commits.
 
 ---
 
-## 9. Common Errors & Fixes
+## 10. Common Errors & Fixes
 
 | Error                                 | Fix                                        |
 |---------------------------------------|--------------------------------------------|
@@ -242,10 +314,13 @@ errors when the remote has new commits.
 | src refspec main does not match any   | git branch -M main, then push              |
 | Logged in via Google                  | Irrelevant for git — use username + token  |
 | Lua syntax error on two assigns       | One statement per line (use ; or newline)  |
+| HUD drifts with camera                | Draw HUD AFTER camera:reset()              |
+| Aim points wrong after camera moves   | Convert mouse: worldX = screenX + camera.x |
+| Clicks fire in menu/pause             | Gate input on State.is("playing")          |
 
 ---
 
-## 10. AI Collaboration Rules
+## 11. AI Collaboration Rules
 
 ### File format
 
@@ -296,12 +371,15 @@ Never "just replace lines X-Y". Always the full file.
 Start a new chat with:
 
     "My project is at https://github.com/Vyrex01/MyGame.
-     Current files: [paste main.lua, player.lua, bullet.lua, enemy.lua, conf.lua].
+     Current files: [paste main.lua, player.lua, bullet.lua, enemy.lua, camera.lua, state.lua, conf.lua].
      Please help with XXX."
+
+The `~/Downloads/mygame/handoff.sh` script dumps all of the above
+(README + all .lua files + git log) in one command for easy pasting.
 
 ---
 
-## 11. Roadmap
+## 12. Roadmap
 
 Done:
 
@@ -318,19 +396,47 @@ Done:
 - [x] Enemies with simple chase AI (chase, spawn, kill, score)
 - [x] Collision: bullet-vs-enemy (circle-circle)
 - [x] Collision + health (100 HP, 20 dmg, i-frames, health bar, game over)
+- [x] Camera / world scrolling (3000x2000 world, follow camera, grid background)
+- [x] Game states (menu, playing, paused, gameover)
+- [x] Cover image
 
 Upcoming:
 
-- [ ] Camera / world scrolling                <-- NEXT
-- [ ] Sprites instead of circles
-- [ ] Game states (menu, playing, paused, game-over)
-- [ ] Sound effects
-- [ ] Score display improvements
-- [ ] Levels / wave spawning
+- [ ] Sprites instead of circles                  <-- NEXT
+- [ ] Sound effects (shoot, hit, death, music)
+- [ ] Wave-based spawning (instead of continuous)
+- [ ] Weapon variety (shotgun, rapid fire)
+- [ ] Power-ups / pickups
+- [ ] Enemy variety (fast, tanky, shooter)
 
 ---
 
-## 12. Changelog
+## 13. Changelog
+
+### v0.8 — Cover Image
+
+- Added cover.jpg to repo root
+- README now shows cover at the top
+
+### v0.7 — Game States
+
+- Added state.lua (State.current, set, is)
+- main.lua: update() returns early unless playing
+- main.lua: draw() routes to drawMenu / drawPlaying / drawPaused / drawGameOver
+- main.lua: keypressed() routes keys per state (ENTER, P, M, R)
+- main.lua: mousepressed() blocks clicks outside "playing"
+- New screens: title menu, pause overlay, game-over overlay
+
+### v0.6 — Camera & Big World
+
+- Added camera.lua (lerp follow, world clamping, screen<->world conversion)
+- main.lua: WORLD_W/H = 3000x2000, camera object, screen->world mouse conversion
+- main.lua: world drawing wrapped in camera:apply()/reset()
+- main.lua: HUD drawn AFTER camera:reset() so it stays in screen space
+- main.lua: world grid background (200px spacing) + border
+- main.lua: enemy spawning at world edges (not screen edges)
+- player.lua: update() takes worldMouseX/Y and worldW/H; aim uses world mouse
+- player.lua: clamp to world bounds (3000x2000) instead of screen (1600x900)
 
 ### v0.5 — Health & Damage
 
