@@ -44,7 +44,9 @@ This is a **2D top-down game** built from scratch with LÖVE2D.
 - Health bar turns green → yellow → red as HP drops
 - World is **3000x2000** with a visible grid; the 1600x900 window is a viewport
 - **Camera follows the player** with smooth lerp, clamped to world edges
-- **Game state machine**: Menu → Playing → Paused → Game Over
+- **Game state machine**: Menu → Playing ↔ Paused → Game Over / Name Entry → High Scores
+- **Arcade 4-letter high score entry** (Pac-Man / Galaga style)
+- **Persistent top-10 high scores** saved to disk
 - Spawn rate ramps up over time (difficulty scaling)
 - Diagonal movement is normalized so it isn't faster than straight
 
@@ -65,15 +67,16 @@ can work on it without confusion.
 ## 3. Project Structure
 
     ~/Downloads/mygame/
-    ├── cover.jpg     # Title / cover image (this README)
-    ├── conf.lua      # Window + engine configuration
-    ├── main.lua      # Entry point — game loop, state routing, HUD
-    ├── player.lua    # Player entity (WASD, mouse aim, shoot cooldown, health)
-    ├── bullet.lua    # Bullet entity (position, velocity, lifetime)
-    ├── enemy.lua     # Enemy entity (chase AI, contact damage)
-    ├── camera.lua    # Follow camera for the 3000x2000 world
-    ├── state.lua     # Game state machine (menu / playing / paused / gameover)
-    └── README.md     # This file
+    ├── cover.jpg      # Title / cover image (this README)
+    ├── conf.lua       # Window + engine configuration
+    ├── main.lua       # Entry point — game loop, state routing, name entry
+    ├── player.lua     # Player entity (WASD, mouse aim, shoot cooldown, health)
+    ├── bullet.lua     # Bullet entity (position, velocity, lifetime)
+    ├── enemy.lua      # Enemy entity (chase AI, contact damage)
+    ├── camera.lua     # Follow camera for the 3000x2000 world
+    ├── state.lua      # Game state machine (6 states)
+    ├── highscore.lua  # Persistent top-10 with 4-letter initials
+    └── README.md      # This file
 
 ---
 
@@ -162,40 +165,54 @@ Key concepts:
 
 ### state.lua
 
-Finite state machine.
+Finite state machine with 6 states.
 
-- State.current — string: "menu" / "playing" / "paused" / "gameover"
-- State.set(name) — switch state
+- State.current — string: "menu" / "playing" / "paused" / "gameover" / "enter_name" / "highscores"
+- State.set(name) — switch state (errors on invalid name)
 - State.is(name) — check current state
 
 Key concepts:
 
 - Update/draw/input routed by current state
 - Only "playing" updates gameplay; others freeze
-- Menu → Playing → (Paused ↔ Playing) → Game Over → Menu
 - Prevents input leaking (clicks in menu don't shoot)
+- Whitelist prevents typos from silently breaking routing
+
+### highscore.lua
+
+Persistent top-10 with 4-letter arcade initials.
+
+- Highscore.max = 10
+- Highscore:load() — reads from save file, seeds defaults if empty
+- Highscore:save() — writes "NAME SCORE" per line
+- Highscore:isHighScore(score) — true if score qualifies for top-10
+- Highscore:add(name, score) — inserts, sorts, trims to max, saves
+- Highscore:getAll() — returns the sorted list
+
+Key concepts:
+
+- Save location: ~/.local/share/love/My 2D Game/highscores.dat
+- Uses love.filesystem (never touches project dir directly)
+- Scores auto-sorted on load and after every add
+- Empty file / first launch seeds with VYRX 5000 at top
 
 ### main.lua
 
 LÖVE2D calls these automatically:
 
-- love.load() — world size, background, start new game, set state to "menu"
-- love.update(dt) — returns early unless playing; converts mouse to world coords; updates player/camera/spawns/collisions/shooting
-- love.draw() — routes to drawMenu / drawPlaying / drawPaused / drawGameOver
-- love.keypressed(key) — global (ESC, F11) + per-state keys
-- love.mousepressed(x, y, button) — blocks clicks outside "playing"
+- love.load() — requires modules, creates fonts, loads high scores, sets state to menu
+- love.update(dt) — routes by state; converts mouse to world coords; spawns, moves, collides, shoots
+- love.draw() — routes to drawMenu / drawPlaying / drawPaused / drawGameOver / drawEnterName / drawHighScores
+- love.keypressed(key) — global keys + per-state input (including 4-letter entry)
+- love.textinput(t) — lets you type letters directly on name entry screen
 
 Handles:
 
 - WORLD_W = 3000, WORLD_H = 2000, SCREEN_W = 1600, SCREEN_H = 900
-- startNewGame() resets player, camera, bullets, enemies, score, spawn timer
-- Camera target = player, follows with lerp
-- Screen→World conversion for the mouse before aiming
-- Spawn timer + difficulty ramp (spawnInterval decreases 0.02s per spawn, floor 0.5s)
-- Bullet-vs-enemy circle collision (+100 score per kill)
-- Enemy-vs-player circle collision (20 damage + 40px knockback to enemy)
-- State change to "gameover" when player dies
-- HUD: FPS, score, enemy count, camera position, health bar
+- startNewGame() resets everything
+- Player death → checks Highscore:isHighScore() → enter_name or gameover
+- Name entry: 4 boxes, arrow keys change/move, letters type, ENTER submits
+- HUD: FPS, score, enemies, camera position, health bar
 
 ---
 
@@ -210,18 +227,29 @@ A 1600x900 window opens showing the main menu.
 
 ## 6. Controls
 
-| Key             | Action                |
-|-----------------|-----------------------|
-| W / A / S / D   | Move                  |
-| Arrow keys      | Also move (bonus)     |
-| Mouse move      | Aim gun               |
-| Hold Left Click | Shoot (auto-fire)     |
-| ENTER           | Start game (from menu)|
-| P               | Pause / Resume        |
-| M               | Return to menu        |
-| R               | Restart (from gameover)|
-| F11             | Toggle fullscreen     |
-| ESC             | Quit                  |
+| Key             | Action                       |
+|-----------------|------------------------------|
+| W / A / S / D   | Move                         |
+| Arrow keys      | Also move (bonus)            |
+| Mouse move      | Aim gun                      |
+| Hold Left Click | Shoot (auto-fire)            |
+| ENTER           | Start game (from menu)       |
+| H               | View high scores             |
+| P               | Pause / Resume               |
+| M               | Return to menu               |
+| R               | Restart (from gameover/scores)|
+| F11             | Toggle fullscreen            |
+| ESC             | Quit                         |
+
+Name entry screen:
+
+| Key             | Action                       |
+|-----------------|------------------------------|
+| Left / Right    | Move cursor between letters  |
+| Up / Down       | Cycle through A-Z, 0-9, space|
+| Any letter/digit| Type directly and advance    |
+| Backspace       | Set current letter to space  |
+| ENTER           | Submit initials              |
 
 ---
 
@@ -238,29 +266,44 @@ A 1600x900 window opens showing the main menu.
 9. Health bar turns yellow at 50%, red at 25%
 10. Spawn interval shrinks by 0.02s per spawn (floor 0.5s)
 11. Press P to pause anytime
-12. At 0 HP → Game Over; press R to restart, or M for menu
+12. At 0 HP → if score qualifies → ENTER INITIALS → HIGH SCORES; else → GAME OVER
+13. Press R to restart, M for menu, H for high scores
 
 ---
 
 ## 8. Game States
 
-    menu      Title screen, press ENTER to start
-              ↓
-    playing   Active gameplay
-              ↕ (press P)
-    paused    Frozen world + dark overlay
-              ↓ (die)
-    gameover  Final score, R restart / M menu
+    menu       Title screen, ENTER to start, H for scores
+                 ↓
+    playing    Active gameplay
+                 ↕ (P)
+    paused     Frozen world + dark overlay
+                 ↓ (die + high score)
+    enter_name 4-letter initials entry (arrows or type)
+                 ↓ (ENTER)
+    highscores Top 10 list
+                 ↑ (M)
+                 ↓ (R)
+    playing    Restart
+                 ↑
+    gameover   Shown if score doesn't qualify for top 10
+               (R restart / M menu / H scores)
 
 Transitions:
 
-- Menu → Playing: press **ENTER**
-- Playing → Paused: press **P**
-- Paused → Playing: press **P**
-- Paused → Menu: press **M**
-- Playing → Game Over: HP reaches 0
-- Game Over → Playing: press **R**
-- Game Over → Menu: press **M**
+- Menu → Playing: **ENTER**
+- Menu → High Scores: **H**
+- Playing → Paused: **P**
+- Paused → Playing: **P**
+- Paused → Menu: **M**
+- Playing → Enter Name: die with qualifying score
+- Playing → Game Over: die with non-qualifying score
+- Enter Name → High Scores: **ENTER** (after submitting)
+- High Scores → Menu: **M** or **ENTER**
+- High Scores → Playing: **R**
+- Game Over → Playing: **R**
+- Game Over → Menu: **M**
+- Game Over → High Scores: **H**
 
 ---
 
@@ -311,12 +354,15 @@ errors when the remote has new commits.
 | Invalid username or token             | Username = Vyrex01, not email              |
 | Password authentication not supported | Use the token, not account password        |
 | Updates were rejected                 | git pull origin main --no-rebase, then push|
-| src refspec main does not match any   | git branch -M main, then push              |
+| non-fast-forward on push              | Finish any pending merge, then pull+push   |
+| MERGE_HEAD exists                     | git commit --no-edit, then pull again      |
 | Logged in via Google                  | Irrelevant for git — use username + token  |
 | Lua syntax error on two assigns       | One statement per line (use ; or newline)  |
 | HUD drifts with camera                | Draw HUD AFTER camera:reset()              |
 | Aim points wrong after camera moves   | Convert mouse: worldX = screenX + camera.x |
 | Clicks fire in menu/pause             | Gate input on State.is("playing")          |
+| Invalid state: enter_name             | Add new state to state.lua valid table     |
+| attempt to call method 'isAlive'      | Make sure player.lua defines it            |
 
 ---
 
@@ -371,7 +417,7 @@ Never "just replace lines X-Y". Always the full file.
 Start a new chat with:
 
     "My project is at https://github.com/Vyrex01/MyGame.
-     Current files: [paste main.lua, player.lua, bullet.lua, enemy.lua, camera.lua, state.lua, conf.lua].
+     Current files: [paste main.lua, player.lua, bullet.lua, enemy.lua, camera.lua, state.lua, highscore.lua, conf.lua].
      Please help with XXX."
 
 The `~/Downloads/mygame/handoff.sh` script dumps all of the above
@@ -399,10 +445,12 @@ Done:
 - [x] Camera / world scrolling (3000x2000 world, follow camera, grid background)
 - [x] Game states (menu, playing, paused, gameover)
 - [x] Cover image
+- [x] Arcade 4-letter high score entry
+- [x] Persistent top-10 high scores
 
 Upcoming:
 
-- [ ] Sprites instead of circles                  <-- NEXT
+- [ ] Sprites instead of circles                   <-- NEXT
 - [ ] Sound effects (shoot, hit, death, music)
 - [ ] Wave-based spawning (instead of continuous)
 - [ ] Weapon variety (shotgun, rapid fire)
@@ -413,10 +461,23 @@ Upcoming:
 
 ## 13. Changelog
 
+### v0.9 — High Scores
+
+- Added highscore.lua (persistent top-10 with 4-letter initials)
+- New state: enter_name (arcade initials entry)
+- New state: highscores (top-10 display)
+- state.lua: whitelist now includes enter_name, highscores
+- player.lua: added isAlive() wrapper
+- main.lua: name entry UI (4 boxes, arrow keys + direct typing)
+- main.lua: love.textinput() for typing letters
+- main.lua: menu now shows "H for High Scores"
+- main.lua: gameover screen shows "H High Scores"
+- Saves to ~/.local/share/love/My 2D Game/highscores.dat
+
 ### v0.8 — Cover Image
 
 - Added cover.jpg to repo root
-- README now shows cover at the top
+- README shows cover at the top
 
 ### v0.7 — Game States
 
